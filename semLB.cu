@@ -101,6 +101,9 @@ extern "C" {
        }
     
   }
+
+
+////////// GPU for Fluid ////////////////////////////////////////////////////////////////////////
    ///BEGIN: FLUID ALLOC AND INITIAL ///
 
   // Allocation
@@ -293,305 +296,8 @@ void *fluid_allocGPUKernel(void *model, float dt, float dx, int width, int heigh
 
   ///END: FLUID ALLOC AND INITIAL ///
 
-////////// Fibre alloc and initial///////
-// alloc 
-void *fiber_allocGPUKernel(void *model, int maxNodes, int maxLinks,
-                           int max_N_conn_at_Node,double dt, double *hostParameters)
-{
-	tmp_fiber_GPUgrids *fgrids=(tmp_fiber_GPUgrids *)malloc(sizeof(tmp_fiber_GPUgrids));
-	fgrids->maxNodes = maxNodes;
-	fgrids->maxLinks = maxLinks;
-	fgrids->dt = dt;
-	fgrids->max_N_conn_at_Node = max_N_conn_at_Node;
 
-        //  allocate memory for fiber nodes //////
-        cudaMalloc((void**)&(fgrids->X), maxNodes * sizeof(double));	
-        cudaMalloc((void**)&(fgrids->Y), maxNodes * sizeof(double));	
-        cudaMalloc((void**)&(fgrids->Z), maxNodes * sizeof(double));	
-
-        cudaMalloc((void**)&(fgrids->X0), maxNodes * sizeof(double));	
-        cudaMalloc((void**)&(fgrids->Y0), maxNodes * sizeof(double));	
-        cudaMalloc((void**)&(fgrids->Z0), maxNodes * sizeof(double));	
-
-        cudaMalloc((void**)&(fgrids->V_X), maxNodes * sizeof(double));	
-        cudaMalloc((void**)&(fgrids->V_Y), maxNodes * sizeof(double));	
-        cudaMalloc((void**)&(fgrids->V_Z), maxNodes * sizeof(double));	
-
-        cudaMalloc((void**)&(fgrids->F_X), maxNodes * sizeof(double));	
-        cudaMalloc((void**)&(fgrids->F_Y), maxNodes * sizeof(double));	
-        cudaMalloc((void**)&(fgrids->F_Z), maxNodes * sizeof(double));	
-
-        cudaMalloc((void**)&(fgrids->NodeType), maxNodes * sizeof(int));	
-        cudaMalloc((void**)&(fgrids->N_Conn_at_Node), maxNodes * sizeof(int));	
-
-
-        //  allocate memory for fiber link //////
-        cudaMallocPitch((void**)&(fgrids->Link_at_Node), &(fgrids->pitchLink_at_Node), max_N_conn_at_Node*sizeof(int), maxNodes); 
-        cudaMallocPitch((void**)&(fgrids->lAdjVer), &(fgrids->pitchlAdjVer), 2*sizeof(int),  maxLinks); 
-
-        cudaMalloc((void**)&(fgrids->linkLengths), maxLinks * sizeof(double));	
-        cudaMalloc((void**)&(fgrids->linkLengths0), maxLinks * sizeof(double));	
-        cudaMalloc((void**)&(fgrids->linkThick), maxLinks * sizeof(double));	
-
-        return fgrids;
-}
-
-
-	
-
-
-// INITIAL 
-  
-void fiber_init_GPUKernel(void *model, void *fg, void *NodeType, void *N_Conn_at_Node, 
-                           void *Link_at_Node, void *lAdjVer, void *linkLengths,void *linkLengths0, 
-                           void *linkThick, void *X,void *V_X,void *X0,  void *F_X, 
-                           void *Y,void *Y0, void *V_Y, void *F_Y, void *Z,void *Z0, void *V_Z, void *F_Z )
-{
-   tmp_fiber_GPUgrids *fgrids = (tmp_fiber_GPUgrids *)fg;
-
-}
-
-
-
-
-
-
-
-
-
-
-
-  ///BEGIN: SEM ALLOC AND INITIAL ///
-  // Allocation
-void *sem_allocGPUKernel(void *model, int maxCells, int maxElements, int SurfElem, 
-                           int newnode, int numReceptorsPerElem, 
-                           float dt, double S0_all, float *hostParameters)
-  {
-   sem_GPUgrids *grids = (sem_GPUgrids *)malloc(sizeof(sem_GPUgrids));
-
-   // Save parameters
-   grids->maxCells = maxCells;
-   grids->maxElements = maxElements;
-   grids->dt = dt;
-   grids->SurfElem = SurfElem;
-   grids->newnodeNum = newnode;
-   grids->numReceptorsPerElem = numReceptorsPerElem;
-   grids->S0_all = S0_all;
-   grids->iextent = make_cudaExtent(grids->SurfElem*sizeof(int), grids->numReceptorsPerElem, 3);
-   grids->dextent = make_cudaExtent(grids->SurfElem*sizeof(double), grids->numReceptorsPerElem, 2);
-   
-  // grids->ReversalPeriod = ReversalPeriod;
-   // Allocate device memory
-   cudaMalloc((void**)&(grids->devImage),sizeof(sem_GPUgrids));
-   size_t pitch_test;
-   // cells and elements
-   cudaMalloc((void**)&(grids->numOfElements), maxCells * sizeof(int));
-   cudaMalloc((void**)&(grids->node_nbrElemNum), newnode * sizeof(int));
-   cudaMalloc((void**)&(grids->S0), SurfElem * sizeof(double));
-   cudaMalloc((void**)&(grids->S), SurfElem * sizeof(double));
-   
-   cudaMallocPitch((void**)&(grids->elementType), &(grids->pitch), maxCells * sizeof(int), maxElements);
-   pitch_test = grids->pitch;
-   cudaMallocPitch((void**)&(grids->triElem), &(grids->pitch), 6 * sizeof(int), SurfElem); 
-   pitchcheck(pitch_test, grids->pitch, 1);
-   cudaMallocPitch((void**)&(grids->receptor_r1), &(grids->pitch), numReceptorsPerElem * sizeof(float), SurfElem); 
-   pitchcheck(pitch_test, grids->pitch, 2);
-   cudaMallocPitch((void**)&(grids->receptor_r2), &(grids->pitch), numReceptorsPerElem * sizeof(float), SurfElem);
-   pitchcheck(pitch_test, grids->pitch, 3);
-   //cudaMallocPitch((void**)&(grids->rho), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   //pitchcheck(pitch_test, grids->pitch);
-   cudaMallocPitch((void**)&(grids->X_Ref), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 4);
-   cudaMallocPitch((void**)&(grids->X), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 5);
-   cudaMallocPitch((void**)&(grids->V_X), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 6);
-   cudaMallocPitch((void**)&(grids->F_X), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 7);
-   cudaMallocPitch((void**)&(grids->Y_Ref), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 8);
-   cudaMallocPitch((void**)&(grids->Y), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 9);
-   cudaMallocPitch((void**)&(grids->V_Y), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 10);
-   cudaMallocPitch((void**)&(grids->RY), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 11);
-   cudaMallocPitch((void**)&(grids->F_Y), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 12);
-   cudaMallocPitch((void**)&(grids->Z_Ref), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 13);
-   cudaMallocPitch((void**)&(grids->Z), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 14);
-   cudaMallocPitch((void**)&(grids->V_Z), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 15);
-   cudaMallocPitch((void**)&(grids->F_Z), &(grids->pitch), maxCells * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 16);
-   cudaMallocPitch((void**)&(grids->node_share_Elem), &(grids->pitch), 10 * sizeof(int), newnode);
-   pitchcheck(pitch_test, grids->pitch, 17);
-   cudaMallocPitch((void**)&(grids->N), &(grids->pitch), 3 * sizeof(double), newnode);
-   pitchcheck(pitch_test, grids->pitch, 18);
-   cudaMallocPitch((void**)&(grids->n), &(grids->pitch), 3 * sizeof(double), newnode);
-   pitchcheck(pitch_test, grids->pitch, 19);
-   cudaMallocPitch((void**)&(grids->q), &(grids->pitch), 3 * sizeof(double), newnode);
-   pitchcheck(pitch_test, grids->pitch, 20);
-   cudaMallocPitch((void**)&(grids->A), &(grids->pitch), 9 * sizeof(double), newnode);
-   pitchcheck(pitch_test, grids->pitch, 21);
-   cudaMallocPitch((void**)&(grids->tau), &(grids->pitch), 9 * sizeof(double), newnode);
-   pitchcheck(pitch_test, grids->pitch,22);
-   cudaMallocPitch((void**)&(grids->Kapa), &(grids->pitch), 9 * sizeof(double), newnode);
-   pitchcheck(pitch_test, grids->pitch, 23);
-   cudaMallocPitch((void**)&(grids->km), &(grids->pitch),sizeof(double), newnode);
-   pitchcheck(pitch_test, grids->pitch, 24);
-   cudaMallocPitch((void**)&(grids->K), &(grids->pitch), 27 * sizeof(double), newnode);
-   pitchcheck(pitch_test, grids->pitch, 25); 
-   cudaMallocPitch((void**)&(grids->nelem), &(grids->pitch), 3 * sizeof(double), SurfElem);
-   pitchcheck(pitch_test, grids->pitch, 26); 
-   cudaMallocPitch((void**)&(grids->Laplace_km), &(grids->pitch),sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 27);
-   cudaMallocPitch((void**)&(grids->node_nbrNodes), &(grids->pitch), 10 * sizeof(int), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 28);
-   cudaMallocPitch((void**)&(grids->bondLengths), &(grids->bondpitch), maxElements * sizeof(double), maxElements);
-   pitchcheck(pitch_test, grids->pitch, 29);
-
-   cudaMalloc3D(&(grids->receptBond), grids->iextent);
-   cudaMalloc3D(&(grids->randNum), grids->dextent);
-   cudacheck("sem_alloc");
-   
-
-  // Reversal Clock Values of cells
-//   cudaMalloc((void**)&(grids->ClockValue), maxCells * sizeof(int));
- //  cudaMalloc((void**)&(grids->SlimeDir), maxCells * sizeof(int));
-
-   // cell centers
-  // cudaMalloc((void**)&(grids->cellCenterX), maxCells * sizeof(float));
-  // cudaMalloc((void**)&(grids->cellCenterY), maxCells * sizeof(float));
-  // cudaMalloc((void**)&(grids->cellCenterZ), maxCells * sizeof(float));
-
-   // copy parameters
-   cudaMemcpyToSymbol(model_Parameters, hostParameters, 100 * sizeof(float), 0, cudaMemcpyHostToDevice);
- 
-   //  Allocate Memory for RNG states
-   /* Allocate space for prng states on device */
-   cudaMalloc((void **)&(grids->devState), SurfElem * numReceptorsPerElem *sizeof(curandState));
-
-   return grids;
-  }
-
-
-// Initialization
-   void sem_initGPUKernel(void *model, void *g, int numOfCells, int *numOfElements, int SurfElem, int numReceptorsPerElem,
-                          void *hostX_Ref, void *hostY_Ref, void *hostZ_Ref,
-                          void *hostX, void *hostY, void *hostRY, void *hostZ, void *hostVX, void *hostVY, void *hostVZ,
-                          void *hostFX, void *hostFY, void *hostFZ, void *hostType, void *hostBonds, 
-                          void *triElem, void *receptor_r1, void *receptor_r2, void *node_share_Elem, void *N,
-                          void * node_nbrElemNum, void * node_nbr_nodes, void *S0, double V0, void *receptBond, void *randNum)//transfer function  // add hostV_X...hostF_X
-   {
-
-
-    sem_GPUgrids *grids = (sem_GPUgrids *)g;
-
-   // Begin RNG Stuff
-   /* Setup prng states */
-   // printf("SurfElem = %d, numReceptors = %d\n", SurfElem, numReceptorsPerElem);
-     // setup_RNG_kernel<<<SurfElem, numReceptorsPerElem>>>(grids->devState);
-   // RNG finished
-   // cudacheck("setup_RNG_kernel");
-    grids->numOfCells = numOfCells;
-    grids->S_all = 0;
-    grids->V0 = V0;
-    grids->V = 0;
-    grids->totalBond = 1;
-   // grids->SurfElem = SurfElem;
-   // grids->numReceptorsPerElem = numReceptorsPerElem;
-
-    // Copy host memory to device memory
-    cudaMemcpy(grids->numOfElements, numOfElements, grids->maxCells * sizeof(int), cudaMemcpyHostToDevice);
-    cudacheck("numOfElements"); 
-    cudaMemcpy(grids->node_nbrElemNum, node_nbrElemNum, grids->newnodeNum * sizeof(int), cudaMemcpyHostToDevice);
-    cudacheck("Neighbor Elements Number"); 
-    cudaMemcpy(grids->S0, S0, grids->SurfElem * sizeof(double), cudaMemcpyHostToDevice);
-    cudacheck("Area"); 
-   // cudaMemcpy(grids->ClockValue, ClockValue, grids->maxCells * sizeof(int), cudaMemcpyHostToDevice);
-   // cudaMemcpy(grids->SlimeDir, SlimeDir, grids->maxCells * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(grids->devImage, grids, sizeof(sem_GPUgrids), cudaMemcpyHostToDevice);
-   cudacheck("devImage"); 
-
-    cudaMemcpy2D(grids->elementType, grids->pitch, hostType, grids->maxCells * sizeof(int), grids->maxCells * sizeof(int), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("elementType"); 
-    cudaMemcpy2D(grids->bondLengths, grids->bondpitch, hostBonds, grids->maxElements * sizeof(double), grids->maxElements * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("bondLengths"); 
-    cudaMemcpy2D(grids->triElem, grids->pitch, triElem, 6 * sizeof(int), 6 * sizeof(int), grids->SurfElem, cudaMemcpyHostToDevice);
-   cudacheck("triElem"); 
-    cudaMemcpy2D(grids->receptor_r1, grids->pitch, receptor_r1, numReceptorsPerElem * sizeof(float), numReceptorsPerElem * sizeof(float), SurfElem, cudaMemcpyHostToDevice);
-   cudacheck("receptor_r1"); 
-    cudaMemcpy2D(grids->receptor_r2, grids->pitch, receptor_r2, numReceptorsPerElem * sizeof(float), numReceptorsPerElem * sizeof(float), SurfElem, cudaMemcpyHostToDevice);
-   cudacheck("receptor_r2"); 
-    cudaMemcpy2D(grids->X_Ref, grids->pitch, hostX_Ref, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("X_Ref"); 
-    cudaMemcpy2D(grids->Y_Ref, grids->pitch, hostY_Ref, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("Y_Ref"); 
-    cudaMemcpy2D(grids->Z_Ref, grids->pitch, hostZ_Ref, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("Z_Ref"); 
-    cudaMemcpy2D(grids->X, grids->pitch, hostX, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("X"); 
-    cudaMemcpy2D(grids->Y, grids->pitch, hostY, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("Y"); 
-    cudaMemcpy2D(grids->RY, grids->pitch, hostY, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("RY"); 
-    cudaMemcpy2D(grids->Z, grids->pitch, hostZ, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("Z"); 
-   // added Memcpy for force and velocity
-    cudaMemcpy2D(grids->F_X, grids->pitch, hostFX, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("FX"); 
-    cudaMemcpy2D(grids->F_Y, grids->pitch, hostFY, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("FY"); 
-    cudaMemcpy2D(grids->F_Z, grids->pitch, hostFZ, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   cudacheck("FZ"); 
-    cudaMemcpy2D(grids->V_X, grids->pitch, hostVX, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-    cudacheck("VX"); 
-    cudaMemcpy2D(grids->V_Y, grids->pitch, hostVY, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-    cudacheck("VY"); 
-    cudaMemcpy2D(grids->V_Z, grids->pitch, hostVZ, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-    cudacheck("VZ");
-    cudaMemcpy2D(grids->node_share_Elem, grids->pitch, node_share_Elem, 10 * sizeof(int), 10 * sizeof(int), grids->newnodeNum, cudaMemcpyHostToDevice);
-    cudacheck("node_share_Elem");
-    cudaMemcpy2D(grids->node_nbrNodes, grids->pitch, node_nbr_nodes, 10 * sizeof(int), 10 * sizeof(int), grids->maxElements, cudaMemcpyHostToDevice);
-    cudacheck("node_nbr_nodes");
-    cudaMemcpy2D(grids->N, grids->pitch, N, 3 * sizeof(double), 3 * sizeof(double), grids->newnodeNum, cudaMemcpyHostToDevice);
-    cudacheck("N");
-   // cudaMemcpy2D(grids->PreV_X, grids->pitch, hostPreVX, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
-   // cudaMemcpy2D(grids->PreV_Y, grids->pitch, hostPreVY, grids->maxCells * sizeof(float), grids->maxCells * sizeof(float), grids->maxElements, cudaMemcpyHostToDevice);
-   // cudaMemcpy2D(grids->PreV_Z, grids->pitch, hostPreVZ, grids->maxCells * sizeof(float), grids->maxCells * sizeof(float), grids->maxElements, cudaMemcpyHostToDevice);
-   //add cudaMec.. for VX, VY, VZ, FX, FY, FZ
-  // cudaMemset2D((void**)&(grids->receptBond), grids->pitch, 0,  numReceptorsPerElem * sizeof(float), SurfElem); 
-   // cudaError_t error = cudaMemset3D(grids->receptBond, -1, grids->iextent);
-   // if (error) printf("cudaERROR Memset receptBond: %s\n", cudaGetErrorString(error));
-    
-    cudaError_t error = cudaMemset2D(grids->km, grids->pitch, 0, grids->maxCells * sizeof(double), grids->newnodeNum);
-    if (error) printf("cudaERROR Memset km: %s\n", cudaGetErrorString(error));
-    
-    cudaMemcpy3DParms p3d = {0};
-    p3d.extent = grids->iextent;
-    p3d.kind = cudaMemcpyHostToDevice;
-      
-    p3d.srcPtr = make_cudaPitchedPtr(receptBond, grids->SurfElem*sizeof(int), grids->SurfElem*sizeof(int), grids->numReceptorsPerElem);
-    p3d.dstPtr = grids->receptBond;
-    error = cudaMemcpy3D(&p3d);
-    if (error) printf("cudaERROR receptBond: %s\n", cudaGetErrorString(error));
-    
-    p3d.extent = grids->dextent;
-    p3d.kind = cudaMemcpyHostToDevice;
-      
-    p3d.srcPtr = make_cudaPitchedPtr(randNum, grids->SurfElem*sizeof(double), grids->SurfElem*sizeof(double), grids->numReceptorsPerElem);
-    p3d.dstPtr = grids->randNum;
-    error = cudaMemcpy3D(&p3d);
-    if (error) printf("cudaERROR randNum: %s\n", cudaGetErrorString(error));
-      
-    cudacheck("sem_init"); 
-   }
-///END SEM ALLOC AND INITIAL ///
-
-  // Execution fluid step(s)
+ // Execution fluid step(s)
   void fluid_invokeGPUKernel(void *model, void *g, void *g_SEM, double *randNum, gsl_rng *r, int timeSteps)
   {
     int aBank, t, i, j, k;
@@ -822,6 +528,437 @@ void *sem_allocGPUKernel(void *model, int maxCells, int maxElements, int SurfEle
 
 } //// END: sem_invokeGPUKernel_Force() 
 
+// Release
+   void fluid_releaseGPUKernel(void *model, void *g)
+   {
+       fluid_GPUgrids *grids = (fluid_GPUgrids *)g;
+       int i;
+       for (i = 0; i < 19; ++i) {
+         cudaFree(&(grids->fIN[i]));
+         cudaFree(&(grids->fOUT[i]));
+       }
+       cudaFree(&(grids->ux));
+       cudaFree(&(grids->uy));
+       cudaFree(&(grids->uz));
+       cudaFree(&(grids->obst));
+       cudaFree(&(grids->rho));
+       cudaFree(&(grids->Fx));
+       cudaFree(&(grids->Fy));
+       cudaFree(&(grids->Fz));
+       cudaFree(&(grids->vWFbond));
+       cudaFree(grids->deviceStruct);
+       free(grids);
+       cudaThreadExit();
+   }
+
+///////////End of GPU Fluid ///////////////////////////////////////////////////////////////////
+
+
+////////// Begin of the GPU for Fiber Network //////////////////////////////////////////////////
+////////// Fibre alloc and initial///////
+// alloc 
+void *fiber_allocGPUKernel(void *model, int maxNodes, int maxLinks,
+                           int max_N_conn_at_Node,double dt, double *hostParameters)
+{
+	tmp_fiber_GPUgrids *fgrids=(tmp_fiber_GPUgrids *)malloc(sizeof(tmp_fiber_GPUgrids));
+	fgrids->maxNodes = maxNodes;
+	fgrids->maxLinks = maxLinks;
+	fgrids->dt = dt;
+	fgrids->max_N_conn_at_Node = max_N_conn_at_Node;
+
+        //  allocate memory for fiber nodes //////
+        cudaMalloc((void**)&(fgrids->X), maxNodes * sizeof(double));	
+        cudaMalloc((void**)&(fgrids->Y), maxNodes * sizeof(double));	
+        cudaMalloc((void**)&(fgrids->Z), maxNodes * sizeof(double));	
+
+        cudaMalloc((void**)&(fgrids->X0), maxNodes * sizeof(double));	
+        cudaMalloc((void**)&(fgrids->Y0), maxNodes * sizeof(double));	
+        cudaMalloc((void**)&(fgrids->Z0), maxNodes * sizeof(double));	
+
+        cudaMalloc((void**)&(fgrids->V_X), maxNodes * sizeof(double));	
+        cudaMalloc((void**)&(fgrids->V_Y), maxNodes * sizeof(double));	
+        cudaMalloc((void**)&(fgrids->V_Z), maxNodes * sizeof(double));	
+
+        cudaMalloc((void**)&(fgrids->F_X), maxNodes * sizeof(double));	
+        cudaMalloc((void**)&(fgrids->F_Y), maxNodes * sizeof(double));	
+        cudaMalloc((void**)&(fgrids->F_Z), maxNodes * sizeof(double));	
+
+        cudaMalloc((void**)&(fgrids->NodeType), maxNodes * sizeof(int));	
+        cudaMalloc((void**)&(fgrids->N_Conn_at_Node), maxNodes * sizeof(int));	
+
+
+        //  allocate memory for fiber link //////
+        cudaMallocPitch((void**)&(fgrids->Link_at_Node), &(fgrids->pitchLink_at_Node), max_N_conn_at_Node*sizeof(int), maxNodes); 
+        cudaMallocPitch((void**)&(fgrids->lAdjVer), &(fgrids->pitchlAdjVer), 2*sizeof(int),  maxLinks); 
+
+        cudaMalloc((void**)&(fgrids->linkLengths), maxLinks * sizeof(double));	
+        cudaMalloc((void**)&(fgrids->linkLengths0), maxLinks * sizeof(double));	
+        cudaMalloc((void**)&(fgrids->linkThick), maxLinks * sizeof(double));	
+
+        return fgrids;
+}
+
+
+	
+
+
+//// INITIAL ///////////////////////////////////////////////////////////////////
+  
+void fiber_init_GPUKernel(void *model, void *fg, void *NodeType, void *N_Conn_at_Node, 
+                           void *Link_at_Node, void *lAdjVer, void *linkLengths,void *linkLengths0, 
+                           void *linkThick, void *X,void *V_X,void *X0,  void *F_X, 
+                           void *Y,void *Y0, void *V_Y, void *F_Y, void *Z,void *Z0, void *V_Z, void *F_Z )
+{
+     	tmp_fiber_GPUgrids *fgrids = (tmp_fiber_GPUgrids *)fg;
+  
+    // memory copy for node
+   	cudaMemcpy(fgrids->N_Conn_at_Node, N_Conn_at_Node, fgrids->maxNodes * sizeof(int), cudaMemcpyHostToDevice);
+    	cudacheck("N_Conn_at_Node");
+
+   	cudaMemcpy(fgrids->NodeType, NodeType, fgrids->maxNodes * sizeof(int), cudaMemcpyHostToDevice);
+    	cudacheck("NodeType");
+  	cudaMemcpy(fgrids->X, X, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("X");
+  	cudaMemcpy(fgrids->Y, Y, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("Y");
+   	cudaMemcpy(fgrids->Z, Z, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("Z");
+   
+  	cudaMemcpy(fgrids->X0, X0, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("X0");
+   	cudaMemcpy(fgrids->Y0, Y0, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("Y0");
+   	cudaMemcpy(fgrids->Z0, Z0, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("Z0");
+
+   	cudaMemcpy(fgrids->V_X, V_X, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("V_X");
+   	cudaMemcpy(fgrids->V_Y, V_Y, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("V_Y");
+   	cudaMemcpy(fgrids->V_Z, V_Z, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("V_Z");
+  
+   	cudaMemcpy(fgrids->F_X, F_X, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("F_X");
+   	cudaMemcpy(fgrids->F_Y, F_Y, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("F_Y");
+   	cudaMemcpy(fgrids->F_Z, F_Z, fgrids->maxNodes * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("F_Z");
+  // memory copy for the link 
+
+   	cudaMemcpy2D(fgrids->Link_at_Node, fgrids->pitchLink_at_Node, Link_at_Node, fgrids->max_N_conn_at_Node * sizeof(int), fgrids->max_N_conn_at_Node * sizeof(int), fgrids->maxNodes, cudaMemcpyHostToDevice);
+   	cudacheck("Link_at_Node");
+   	cudaMemcpy2D(fgrids->lAdjVer, fgrids->pitchlAdjVer, lAdjVer, 2 * sizeof(int), 2 * sizeof(int), fgrids->maxLinks, cudaMemcpyHostToDevice);
+   	cudacheck("lAdjVer");
+
+   	cudaMemcpy(fgrids->linkLengths, linkLengths, fgrids->maxLinks * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("linkLengths");
+   	cudaMemcpy(fgrids->linkLengths0, linkLengths0, fgrids->maxLinks * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("linkLengths0");
+   	cudaMemcpy(fgrids->linkThick, linkThick, fgrids->maxLinks * sizeof(double), cudaMemcpyHostToDevice);
+    	cudacheck("linkThick");
+  
+  
+}
+
+
+// COMPUTE THE FORCE ///////////
+
+
+
+
+
+
+
+
+
+// memory copy from device to host 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// memory release 
+
+void fiber_release_GPUKernel(void *model, void *fg)
+   {	
+	tmp_fiber_GPUgrids *fgrids = (tmp_fiber_GPUgrids *)fg;
+
+    	
+    	cudaFree(fgrids->NodeType);
+    	cudaFree(fgrids->N_Conn_at_Node);
+    	cudaFree(fgrids->Link_at_Node);
+    	cudaFree(fgrids->lAdjVer);
+    	cudaFree(fgrids->linkLengths);
+    	cudaFree(fgrids->linkLengths0);
+    	cudaFree(fgrids->linkThick);
+    
+    	cudaFree(fgrids->X);
+    	cudaFree(fgrids->V_X);
+    	cudaFree(fgrids->F_X);
+   
+  	cudaFree(fgrids->Y);
+    	cudaFree(fgrids->V_Y);
+    	cudaFree(fgrids->F_Y);
+   
+	cudaFree(fgrids->Z);
+   	cudaFree(fgrids->V_Z);
+    	cudaFree(fgrids->F_Z);
+
+    //cudaFree(grids->cellCenterZ);
+    free(fgrids);
+    cudaThreadExit();
+   }
+
+
+
+//////////////////////////END of GPU for the Fiber Network /////////////////////////////////////
+
+
+
+
+/////////////////////////BEGIN OF GPU for the Platelets ///////////////////////////////////////
+
+  ///BEGIN: SEM ALLOC AND INITIAL ///
+  // Allocation
+void *sem_allocGPUKernel(void *model, int maxCells, int maxElements, int SurfElem, 
+                           int newnode, int numReceptorsPerElem, 
+                           float dt, double S0_all, float *hostParameters)
+  {
+   	sem_GPUgrids *grids = (sem_GPUgrids *)malloc(sizeof(sem_GPUgrids));
+
+   // Save parameters
+   	grids->maxCells = maxCells;
+   	grids->maxElements = maxElements;
+   	grids->dt = dt;
+   	grids->SurfElem = SurfElem;
+	grids->newnodeNum = newnode;
+   	grids->numReceptorsPerElem = numReceptorsPerElem;
+   	grids->S0_all = S0_all;
+   	grids->iextent = make_cudaExtent(grids->SurfElem*sizeof(int), grids->numReceptorsPerElem, 3);
+   	grids->dextent = make_cudaExtent(grids->SurfElem*sizeof(double), grids->numReceptorsPerElem, 2);
+   
+  // grids->ReversalPeriod = ReversalPeriod;
+   // Allocate device memory
+   	cudaMalloc((void**)&(grids->devImage),sizeof(sem_GPUgrids));
+   	size_t pitch_test;
+   // cells and elements
+   	cudaMalloc((void**)&(grids->numOfElements), maxCells * sizeof(int));
+   	cudaMalloc((void**)&(grids->node_nbrElemNum), newnode * sizeof(int));
+   	cudaMalloc((void**)&(grids->S0), SurfElem * sizeof(double));
+   	cudaMalloc((void**)&(grids->S), SurfElem * sizeof(double));
+   
+   	cudaMallocPitch((void**)&(grids->elementType), &(grids->pitch), maxCells * sizeof(int), maxElements);
+   	pitch_test = grids->pitch;
+   	cudaMallocPitch((void**)&(grids->triElem), &(grids->pitch), 6 * sizeof(int), SurfElem); 
+   	pitchcheck(pitch_test, grids->pitch, 1);
+   	cudaMallocPitch((void**)&(grids->receptor_r1), &(grids->pitch), numReceptorsPerElem * sizeof(float), SurfElem); 
+   	pitchcheck(pitch_test, grids->pitch, 2);
+   	cudaMallocPitch((void**)&(grids->receptor_r2), &(grids->pitch), numReceptorsPerElem * sizeof(float), SurfElem);
+   	pitchcheck(pitch_test, grids->pitch, 3);
+   //cudaMallocPitch((void**)&(grids->rho), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   //pitchcheck(pitch_test, grids->pitch);
+   	cudaMallocPitch((void**)&(grids->X_Ref), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 4);
+   	cudaMallocPitch((void**)&(grids->X), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 5);
+   	cudaMallocPitch((void**)&(grids->V_X), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 6);
+   	cudaMallocPitch((void**)&(grids->F_X), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 7);
+   	cudaMallocPitch((void**)&(grids->Y_Ref), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 8);
+   	cudaMallocPitch((void**)&(grids->Y), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 9);
+   	cudaMallocPitch((void**)&(grids->V_Y), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 10);
+   	cudaMallocPitch((void**)&(grids->RY), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 11);
+   	cudaMallocPitch((void**)&(grids->F_Y), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 12);
+   	cudaMallocPitch((void**)&(grids->Z_Ref), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 13);
+   	cudaMallocPitch((void**)&(grids->Z), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 14);
+   	cudaMallocPitch((void**)&(grids->V_Z), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 15);
+   	cudaMallocPitch((void**)&(grids->F_Z), &(grids->pitch), maxCells * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 16);
+   	cudaMallocPitch((void**)&(grids->node_share_Elem), &(grids->pitch), 10 * sizeof(int), newnode);
+   	pitchcheck(pitch_test, grids->pitch, 17);
+   	cudaMallocPitch((void**)&(grids->N), &(grids->pitch), 3 * sizeof(double), newnode);
+   	pitchcheck(pitch_test, grids->pitch, 18);
+   	cudaMallocPitch((void**)&(grids->n), &(grids->pitch), 3 * sizeof(double), newnode);
+   	pitchcheck(pitch_test, grids->pitch, 19);
+   	cudaMallocPitch((void**)&(grids->q), &(grids->pitch), 3 * sizeof(double), newnode);
+   	pitchcheck(pitch_test, grids->pitch, 20);
+   	cudaMallocPitch((void**)&(grids->A), &(grids->pitch), 9 * sizeof(double), newnode);
+   	pitchcheck(pitch_test, grids->pitch, 21);
+   	cudaMallocPitch((void**)&(grids->tau), &(grids->pitch), 9 * sizeof(double), newnode);
+   	pitchcheck(pitch_test, grids->pitch,22);
+   	cudaMallocPitch((void**)&(grids->Kapa), &(grids->pitch), 9 * sizeof(double), newnode);
+   	pitchcheck(pitch_test, grids->pitch, 23);
+   	cudaMallocPitch((void**)&(grids->km), &(grids->pitch),sizeof(double), newnode);
+   	pitchcheck(pitch_test, grids->pitch, 24);
+   	cudaMallocPitch((void**)&(grids->K), &(grids->pitch), 27 * sizeof(double), newnode);
+   	pitchcheck(pitch_test, grids->pitch, 25); 
+   	cudaMallocPitch((void**)&(grids->nelem), &(grids->pitch), 3 * sizeof(double), SurfElem);
+   	pitchcheck(pitch_test, grids->pitch, 26); 
+   	cudaMallocPitch((void**)&(grids->Laplace_km), &(grids->pitch),sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 27);
+   	cudaMallocPitch((void**)&(grids->node_nbrNodes), &(grids->pitch), 10 * sizeof(int), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 28);
+   	cudaMallocPitch((void**)&(grids->bondLengths), &(grids->bondpitch), maxElements * sizeof(double), maxElements);
+   	pitchcheck(pitch_test, grids->pitch, 29);
+
+   	cudaMalloc3D(&(grids->receptBond), grids->iextent);
+   	cudaMalloc3D(&(grids->randNum), grids->dextent);
+   	cudacheck("sem_alloc");
+   
+
+  // Reversal Clock Values of cells
+//   cudaMalloc((void**)&(grids->ClockValue), maxCells * sizeof(int));
+ //  cudaMalloc((void**)&(grids->SlimeDir), maxCells * sizeof(int));
+
+   // cell centers
+  // cudaMalloc((void**)&(grids->cellCenterX), maxCells * sizeof(float));
+  // cudaMalloc((void**)&(grids->cellCenterY), maxCells * sizeof(float));
+  // cudaMalloc((void**)&(grids->cellCenterZ), maxCells * sizeof(float));
+
+   // copy parameters
+   	cudaMemcpyToSymbol(model_Parameters, hostParameters, 100 * sizeof(float), 0, cudaMemcpyHostToDevice);
+ 
+   //  Allocate Memory for RNG states
+   /* Allocate space for prng states on device */
+   	cudaMalloc((void **)&(grids->devState), SurfElem * numReceptorsPerElem *sizeof(curandState));
+
+   	return grids;
+  }
+
+
+// Initialization
+void sem_initGPUKernel(void *model, void *g, int numOfCells, int *numOfElements, int SurfElem, int numReceptorsPerElem,
+                          void *hostX_Ref, void *hostY_Ref, void *hostZ_Ref,
+                          void *hostX, void *hostY, void *hostRY, void *hostZ, void *hostVX, void *hostVY, void *hostVZ,
+                          void *hostFX, void *hostFY, void *hostFZ, void *hostType, void *hostBonds, 
+                          void *triElem, void *receptor_r1, void *receptor_r2, void *node_share_Elem, void *N,
+                          void * node_nbrElemNum, void * node_nbr_nodes, void *S0, double V0, void *receptBond, void *randNum)//transfer function  // add hostV_X...hostF_X
+   {
+
+
+    sem_GPUgrids *grids = (sem_GPUgrids *)g;
+
+   // Begin RNG Stuff
+   /* Setup prng states */
+   // printf("SurfElem = %d, numReceptors = %d\n", SurfElem, numReceptorsPerElem);
+     // setup_RNG_kernel<<<SurfElem, numReceptorsPerElem>>>(grids->devState);
+   // RNG finished
+   // cudacheck("setup_RNG_kernel");
+    grids->numOfCells = numOfCells;
+    grids->S_all = 0;
+    grids->V0 = V0;
+    grids->V = 0;
+    grids->totalBond = 1;
+   // grids->SurfElem = SurfElem;
+   // grids->numReceptorsPerElem = numReceptorsPerElem;
+
+    // Copy host memory to device memory
+    cudaMemcpy(grids->numOfElements, numOfElements, grids->maxCells * sizeof(int), cudaMemcpyHostToDevice);
+    cudacheck("numOfElements"); 
+    cudaMemcpy(grids->node_nbrElemNum, node_nbrElemNum, grids->newnodeNum * sizeof(int), cudaMemcpyHostToDevice);
+    cudacheck("Neighbor Elements Number"); 
+    cudaMemcpy(grids->S0, S0, grids->SurfElem * sizeof(double), cudaMemcpyHostToDevice);
+    cudacheck("Area"); 
+   // cudaMemcpy(grids->ClockValue, ClockValue, grids->maxCells * sizeof(int), cudaMemcpyHostToDevice);
+   // cudaMemcpy(grids->SlimeDir, SlimeDir, grids->maxCells * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(grids->devImage, grids, sizeof(sem_GPUgrids), cudaMemcpyHostToDevice);
+   cudacheck("devImage"); 
+
+    cudaMemcpy2D(grids->elementType, grids->pitch, hostType, grids->maxCells * sizeof(int), grids->maxCells * sizeof(int), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("elementType"); 
+    cudaMemcpy2D(grids->bondLengths, grids->bondpitch, hostBonds, grids->maxElements * sizeof(double), grids->maxElements * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("bondLengths"); 
+    cudaMemcpy2D(grids->triElem, grids->pitch, triElem, 6 * sizeof(int), 6 * sizeof(int), grids->SurfElem, cudaMemcpyHostToDevice);
+   cudacheck("triElem"); 
+    cudaMemcpy2D(grids->receptor_r1, grids->pitch, receptor_r1, numReceptorsPerElem * sizeof(float), numReceptorsPerElem * sizeof(float), SurfElem, cudaMemcpyHostToDevice);
+   cudacheck("receptor_r1"); 
+    cudaMemcpy2D(grids->receptor_r2, grids->pitch, receptor_r2, numReceptorsPerElem * sizeof(float), numReceptorsPerElem * sizeof(float), SurfElem, cudaMemcpyHostToDevice);
+   cudacheck("receptor_r2"); 
+    cudaMemcpy2D(grids->X_Ref, grids->pitch, hostX_Ref, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("X_Ref"); 
+    cudaMemcpy2D(grids->Y_Ref, grids->pitch, hostY_Ref, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("Y_Ref"); 
+    cudaMemcpy2D(grids->Z_Ref, grids->pitch, hostZ_Ref, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("Z_Ref"); 
+    cudaMemcpy2D(grids->X, grids->pitch, hostX, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("X"); 
+    cudaMemcpy2D(grids->Y, grids->pitch, hostY, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("Y"); 
+    cudaMemcpy2D(grids->RY, grids->pitch, hostY, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("RY"); 
+    cudaMemcpy2D(grids->Z, grids->pitch, hostZ, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("Z"); 
+   // added Memcpy for force and velocity
+    cudaMemcpy2D(grids->F_X, grids->pitch, hostFX, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("FX"); 
+    cudaMemcpy2D(grids->F_Y, grids->pitch, hostFY, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("FY"); 
+    cudaMemcpy2D(grids->F_Z, grids->pitch, hostFZ, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   cudacheck("FZ"); 
+    cudaMemcpy2D(grids->V_X, grids->pitch, hostVX, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+    cudacheck("VX"); 
+    cudaMemcpy2D(grids->V_Y, grids->pitch, hostVY, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+    cudacheck("VY"); 
+    cudaMemcpy2D(grids->V_Z, grids->pitch, hostVZ, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+    cudacheck("VZ");
+    cudaMemcpy2D(grids->node_share_Elem, grids->pitch, node_share_Elem, 10 * sizeof(int), 10 * sizeof(int), grids->newnodeNum, cudaMemcpyHostToDevice);
+    cudacheck("node_share_Elem");
+    cudaMemcpy2D(grids->node_nbrNodes, grids->pitch, node_nbr_nodes, 10 * sizeof(int), 10 * sizeof(int), grids->maxElements, cudaMemcpyHostToDevice);
+    cudacheck("node_nbr_nodes");
+    cudaMemcpy2D(grids->N, grids->pitch, N, 3 * sizeof(double), 3 * sizeof(double), grids->newnodeNum, cudaMemcpyHostToDevice);
+    cudacheck("N");
+   // cudaMemcpy2D(grids->PreV_X, grids->pitch, hostPreVX, grids->maxCells * sizeof(double), grids->maxCells * sizeof(double), grids->maxElements, cudaMemcpyHostToDevice);
+   // cudaMemcpy2D(grids->PreV_Y, grids->pitch, hostPreVY, grids->maxCells * sizeof(float), grids->maxCells * sizeof(float), grids->maxElements, cudaMemcpyHostToDevice);
+   // cudaMemcpy2D(grids->PreV_Z, grids->pitch, hostPreVZ, grids->maxCells * sizeof(float), grids->maxCells * sizeof(float), grids->maxElements, cudaMemcpyHostToDevice);
+   //add cudaMec.. for VX, VY, VZ, FX, FY, FZ
+  // cudaMemset2D((void**)&(grids->receptBond), grids->pitch, 0,  numReceptorsPerElem * sizeof(float), SurfElem); 
+   // cudaError_t error = cudaMemset3D(grids->receptBond, -1, grids->iextent);
+   // if (error) printf("cudaERROR Memset receptBond: %s\n", cudaGetErrorString(error));
+    
+    cudaError_t error = cudaMemset2D(grids->km, grids->pitch, 0, grids->maxCells * sizeof(double), grids->newnodeNum);
+    if (error) printf("cudaERROR Memset km: %s\n", cudaGetErrorString(error));
+    
+    cudaMemcpy3DParms p3d = {0};
+    p3d.extent = grids->iextent;
+    p3d.kind = cudaMemcpyHostToDevice;
+      
+    p3d.srcPtr = make_cudaPitchedPtr(receptBond, grids->SurfElem*sizeof(int), grids->SurfElem*sizeof(int), grids->numReceptorsPerElem);
+    p3d.dstPtr = grids->receptBond;
+    error = cudaMemcpy3D(&p3d);
+    if (error) printf("cudaERROR receptBond: %s\n", cudaGetErrorString(error));
+    
+    p3d.extent = grids->dextent;
+    p3d.kind = cudaMemcpyHostToDevice;
+      
+    p3d.srcPtr = make_cudaPitchedPtr(randNum, grids->SurfElem*sizeof(double), grids->SurfElem*sizeof(double), grids->numReceptorsPerElem);
+    p3d.dstPtr = grids->randNum;
+    error = cudaMemcpy3D(&p3d);
+    if (error) printf("cudaERROR randNum: %s\n", cudaGetErrorString(error));
+      
+    cudacheck("sem_init"); 
+   }
+///END SEM ALLOC AND INITIAL ///
+
+ 
 
    void sem_copyGPUKernel(void *model, void *g, void *hostX, void *hostY, void *hostRY, void *hostZ, 
                           void *hostVX, void *hostVY, void *hostVZ, 
@@ -848,29 +985,7 @@ void *sem_allocGPUKernel(void *model, int maxCells, int maxElements, int SurfEle
 
 
    // Release
-   // Release
-   void fluid_releaseGPUKernel(void *model, void *g)
-   {
-       fluid_GPUgrids *grids = (fluid_GPUgrids *)g;
-       int i;
-       for (i = 0; i < 19; ++i) {
-         cudaFree(&(grids->fIN[i]));
-         cudaFree(&(grids->fOUT[i]));
-       }
-       cudaFree(&(grids->ux));
-       cudaFree(&(grids->uy));
-       cudaFree(&(grids->uz));
-       cudaFree(&(grids->obst));
-       cudaFree(&(grids->rho));
-       cudaFree(&(grids->Fx));
-       cudaFree(&(grids->Fy));
-       cudaFree(&(grids->Fz));
-       cudaFree(&(grids->vWFbond));
-       cudaFree(grids->deviceStruct);
-       free(grids);
-       cudaThreadExit();
-   }
-
+   
    void sem_releaseGPUKernel(void *model, void *g)
    {
     sem_GPUgrids *grids = (sem_GPUgrids *)g;
@@ -903,3 +1018,5 @@ void *sem_allocGPUKernel(void *model, int maxCells, int maxElements, int SurfEle
    }
 
 } /// END::: extern "C" {
+
+//////////////////////////////////End of GPU for the Platelets///////////////////////////////////
