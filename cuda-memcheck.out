@@ -1,0 +1,5 @@
+Starting cuda-memcheck...
+Invalid read of size 4
+    at 0x000000e0 in sem_Force (sem_kernel.cu:123)
+    by thread (70,0,0) in block (1,0,0)
+Global address 0x00b374d4 is out of bounds

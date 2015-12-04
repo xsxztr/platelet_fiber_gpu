@@ -1,0 +1,569 @@
+/*
+ sem_kernel.cu
+ 
+ GPU kernel functions.
+
+ Author: Scott Christley <schristley@mac.com>
+ 
+ Copyright (C) 2010 Scott Christley
+ All rights reserved.
+
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions
+ are met: 1. Redistributions of source code must retain the above
+ copyright notice, this list of conditions and the following
+ disclaimer.  2. Redistributions in binary form must reproduce the
+ above copyright notice, this list of conditions and the following
+ disclaimer in the documentation and/or other materials provided with
+ the distribution.  3. The name of the author may not be used to
+ endorse or promote products derived from this software without
+ specific prior written permission.
+
+ THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+ IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
+ IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+ */
+// parameters
+#define INTRA_U0 0.3
+#define INTRA_U1 0.1
+#define INTRA_ETA0 0.12
+#define INTRA_ETA1 0.36
+
+#define INTER_DIST 0.6
+#define INTER_U0 0.3
+#define INTER_U1 0.05
+#define INTER_ETA0 0.12
+#define INTER_ETA1 0.24
+
+// boundary conditions
+#define PERIODIC_BOUNDARY 0
+//#define PERIODIC_BOUNDARY 1
+
+//#define HARD_Z 0
+#define HARD_Z 1
+
+// For 128 and 250 cells
+#define BOUNDARY_X 100.0
+#define BOUNDARY_Y 100.0
+#define BOUNDARY_Z 10.0
+
+// Parameters for Myxo code
+
+#define Cell_Width myxo_Parameters[0]//.5
+#define Seg_Length myxo_Parameters[2] // 0.5 // target legth of segments
+#define k_bond  myxo_Parameters[3]  // 79.0   // k_bond should be 79 nN/um
+#define THETA_EQ  myxo_Parameters[4]  // 0.1 // bending constant
+#define k_bend  myxo_Parameters[5]  // 0.1 // bending constant
+#define mass myxo_Parameters[6]//0.1 // assummg 9 SCE per cell and 1pg per cell -> mass/SCE = .1
+#define gamma myxo_Parameters[7]//10.0//should be 1.8e6   (units are in nN / (um / us))
+#define f_slime myxo_Parameters[8]//0.000 // slime force value is 120 pN
+#define Epsilon myxo_Parameters[9]///.0025 //
+#define NB_CUTOFF  myxo_Parameters[10]//.7 // cutoff distance of non-bonded interaction
+#define Temp myxo_Parameters[11]// 4.2e-6 // k_b * Temp, for room Temp ~ 300 K
+
+#define NO_NB 0 // turn off non-bonded for debugging
+
+//#define SlimeDir 1 // set the slime at one end for now.
+//
+////////////////////////////////////////////////////////////////////////////////////
+//
+
+
+#define norm(dx, dy, dz) sqrt( ( dx )*( dx ) + ( dy )*( dy ) + ( dz )*( dz ) )
+
+#define MORSE(r, U, UE, V, VE) (U)*exp(-(r)/(UE)) - (V)*exp(-(r)/(VE))
+
+// only repulsive force, zero out attractive force
+__device__ float P_MORSE(float r, float U, float UE, float V, float VE)
+{
+  float m = (U)*exp(-(r)/(UE)) - (V)*exp(-(r)/(VE));
+  if (m < 0) return 0.0;
+  else return m;
+}
+
+//
+// Sector neighbor function:
+// A given sector has 26 neighboring sectors in 3D space.
+// The X dimension is considered left/right.
+// The Y dimension is considered up/down.
+// The Z dimension is considered front/back.
+// We number them sequentially, so we can easily iterate through them
+// First 2 are neighbors in 1D
+#define S_X_TOT 3
+// First 8 are neighbors in 2D
+#define S_XY_TOT 9
+// All 26 are neighbors in 3D
+#define S_XYZ_TOT 27
+//
+#define S_NONE -1
+#define S_CURRENT 0
+#define S_START 1
+#define S_LEFT 1
+#define S_RIGHT 2
+#define S_UP 3
+#define S_DOWN 4
+#define S_LEFT_UP 5
+#define S_RIGHT_UP 6
+#define S_LEFT_DOWN 7
+#define S_RIGHT_DOWN 8
+#define S_FRONT 9
+#define S_BACK 10
+#define S_LEFT_FRONT 11
+#define S_RIGHT_FRONT 12
+#define S_LEFT_BACK 13
+#define S_RIGHT_BACK 14
+#define S_UP_FRONT 15
+#define S_DOWN_FRONT 16
+#define S_UP_BACK 17
+#define S_DOWN_BACK 18
+#define S_LEFT_UP_FRONT 19
+#define S_RIGHT_UP_FRONT 20
+#define S_LEFT_DOWN_FRONT 21
+#define S_RIGHT_DOWN_FRONT 22
+#define S_LEFT_UP_BACK 23
+#define S_RIGHT_UP_BACK 24
+#define S_LEFT_DOWN_BACK 25
+#define S_RIGHT_DOWN_BACK 26
+
+////////////////////////////////////////////////////////////////////////////////////
+//
+__global__ void setup_kernel(curandState *state) {
+int id = threadIdx.x + blockIdx.x * X_a   ; // 65;
+/* Each thread gets same seed, a different sequence number,
+no offset */
+
+curand_init(1234, id, 0, &state[id]);
+}
+
+
+// Calculae cell center
+__global__ void
+skin_center_kernel(int *numOfElements, float *X, float *Y, float *Z, int *elementType,
+		   float *cellCenterX, float *cellCenterY, float *cellCenterZ, size_t pitch,
+		   int numOfCells, int maxCells, int maxElements, float dt)
+{
+  int cellNum = blockIdx.x * blockDim.x + threadIdx.x;
+  int elemNum;
+  
+  if (cellNum >= numOfCells) return;
+  
+  float cX = 0.0;
+  float cY = 0.0;
+  float cZ = 0.0;
+  float minX, maxX;
+  float minY, maxY;
+  
+  minX = X[cellNum];
+  maxX = X[cellNum];
+  minY = Y[cellNum];
+  maxY = Y[cellNum];
+  for (elemNum = 0; elemNum < numOfElements[cellNum]; ++elemNum) {
+    cX += X[elemNum*pitch+cellNum];
+    cY += Y[elemNum*pitch+cellNum];
+    cZ += Z[elemNum*pitch+cellNum];
+    if (X[elemNum*pitch+cellNum] < minX) minX = X[elemNum*pitch+cellNum];
+    if (X[elemNum*pitch+cellNum] > maxX) maxX = X[elemNum*pitch+cellNum];
+    if (Y[elemNum*pitch+cellNum] < minY) minY = Y[elemNum*pitch+cellNum];
+    if (Y[elemNum*pitch+cellNum] > maxY) maxY = Y[elemNum*pitch+cellNum];
+  }
+  
+  cX = cX / (float)numOfElements[cellNum];
+  cY = cY / (float)numOfElements[cellNum];
+  cZ = cZ / (float)numOfElements[cellNum];
+  
+  // handle special case when cell is split across periodic boundary
+  if ((maxX - minX) > (BOUNDARY_X / 2)) {
+    cX = 0;
+    for (elemNum = 0; elemNum < numOfElements[cellNum]; ++elemNum) {
+      if (X[elemNum*pitch+cellNum] > (BOUNDARY_X / 2))
+        cX += X[elemNum*pitch+cellNum] - BOUNDARY_X;
+      else
+        cX += X[elemNum*pitch+cellNum];
+    }
+    cX = cX / (float)numOfElements[cellNum];
+    if (cX < 0) cX += BOUNDARY_X;
+  }
+  if ((maxY - minY) > (BOUNDARY_Y / 2)) {
+    cY = 0;
+    for (elemNum = 0; elemNum < numOfElements[cellNum]; ++elemNum) {
+      if (Y[elemNum*pitch+cellNum] > (BOUNDARY_Y / 2))
+        cY += Y[elemNum*pitch+cellNum] - BOUNDARY_Y;
+      else
+        cY += Y[elemNum*pitch+cellNum];
+    }
+    cY = cY / (float)numOfElements[cellNum];
+    if (cY < 0) cY += BOUNDARY_Y;
+  }
+  
+  cellCenterX[cellNum] = cX;
+  cellCenterY[cellNum] = cY;
+  cellCenterZ[cellNum] = cZ;  
+}
+
+//
+// Cell movement, cell center implementation
+//
+
+// New equations for Myxo movement
+
+
+// Verlet 1 uses v(t), f(t) to get x(t+dt) and v(t + dt/2 )
+// 
+// This call we write new coordinate positions for the SCE and get the half-velocity value. 
+// It will also resert the F_xyz to  zero for all elements.
+
+__global__ void
+verlet_1(int *numOfElements, float *X, float *V_X, float *F_X, float *Y, float *V_Y, float *F_Y, float *Z, float *V_Z, float *F_Z,
+		   float *cX, float *cY, float *cZ,
+		   int *elementType, size_t pitch, int numOfCells, int maxCells, int maxElements, float dt, curandState *state, int totT)
+{
+   int cellNum = blockIdx.x * blockDim.x + threadIdx.x;
+   int elemNum = blockIdx.y * blockDim.y + threadIdx.y;
+   int id = threadIdx.y * X_a + threadIdx.x   ;
+   if (cellNum >= numOfCells) return;
+   if (elemNum >= numOfElements[cellNum]) return;
+    /* Copy state to local memory for efficiency */
+    curandState localState = state[id];
+
+
+// Calculate the Velocity at half-step from Force at current step
+// Generalized Verlet for Langevin Dynamics using BBK
+   float ranTerm = 0.0; // begin with zero random component
+#if 0
+   ranTerm = sqrt(2 * Temp * gamma) * curand_normal(&localState);
+   V_X[elemNum*pitch+cellNum] = V_X[elemNum*pitch+cellNum] + (0.5 / mass) * dt * ( F_X[elemNum*pitch+cellNum] - gamma * mass * V_X[elemNum*pitch+cellNum] + ranTerm ) ;
+
+   ranTerm = sqrt(2 * Temp * gamma) * curand_normal(&localState);
+   V_Y[elemNum*pitch+cellNum] = V_Y[elemNum*pitch+cellNum] + (0.5 / mass) * dt * ( F_Y[elemNum*pitch+cellNum] - gamma * mass * V_Y[elemNum*pitch+cellNum] + ranTerm ) ;
+
+   ranTerm = sqrt(2 * Temp * gamma) * curand_normal(&localState);
+   V_Z[elemNum*pitch+cellNum] = V_Z[elemNum*pitch+cellNum] + (0.5 / mass) * dt * ( F_Z[elemNum*pitch+cellNum] - gamma * mass * V_Y[elemNum*pitch+cellNum] + ranTerm ) ;
+#endif
+   const float fdt = ( 1.0 - exp( -0.5 * gamma * dt ) ) / gamma;
+   const float vdt = exp(-0.5*gamma*dt);
+   const float ndt = sqrt( ( 1.0 - exp( -gamma * dt ) ) / (2.0 * gamma) );
+   const float forceConstant = 2 * Temp * gamma; // Constant::SI::BOLTZMANN * 1.0e15 //for SI units, BOLTZMANN //
+                                      //  * myLangevinTemperature
+                                        //    * effGamma;
+   float sqrtFCoverM = sqrt(forceConstant / mass);
+
+   ranTerm =  curand_normal(&localState);
+   V_X[elemNum*pitch+cellNum] = V_X[elemNum*pitch+cellNum]*vdt +  F_X[elemNum*pitch+cellNum]*fdt/mass +  ranTerm*sqrtFCoverM * ndt  ;
+
+   ranTerm =  curand_normal(&localState);
+   V_Y[elemNum*pitch+cellNum] = V_Y[elemNum*pitch+cellNum]*vdt +  F_Y[elemNum*pitch+cellNum]*fdt/mass +  ranTerm*sqrtFCoverM * ndt  ;
+
+   ranTerm =  curand_normal(&localState);
+   V_Z[elemNum*pitch+cellNum] = V_Z[elemNum*pitch+cellNum]*vdt +  F_Z[elemNum*pitch+cellNum]*fdt/mass +  ranTerm*sqrtFCoverM * ndt  ;
+
+
+
+/* Copy state back to global memory */
+   state[id] = localState;
+// Zero the Force for the next step
+
+   F_X[elemNum*pitch+cellNum] = 0.0 ;
+   F_Y[elemNum*pitch+cellNum] = 0.0 ;
+   F_Z[elemNum*pitch+cellNum] = 0.0 ;
+
+// update position coordiante with half-velocity
+
+/// BEGIN : SIMPLE FLOW ///
+#if 0
+//  Add flow in x-dirction with linear velocity profile in z-directioe
+// use z-position to determine flow velocity
+  float SCEradius = 0.2;
+  float dz1 = 0.0;
+  float vFlow = 0.0;
+  dz1 = X[elemNum*pitch+cellNum] - 0.8 ; // yz-plane located at z = 0.5;
+// if SCE is in contact with wall (ie dz1 < SCEradius), the cell should experience zero flow
+  float maxFlow = 0.1; //set to one for testing
+  if(dz1> SCEradius){
+  float flowHeight;// set the zero-velocity point at z = SCEradiusa
+  flowHeight = (dz1 - SCEradius);
+  vFlow =  flowHeight * maxFlow;  // add force from constant flow.
+  }
+   X[elemNum*pitch+cellNum] = X[elemNum*pitch+cellNum] + 0.5 * dt * V_X[elemNum*pitch+cellNum];//  + vFlow);
+   Y[elemNum*pitch+cellNum] = Y[elemNum*pitch+cellNum] + 0.5 * dt * V_Y[elemNum*pitch+cellNum];// + vFlow);
+   Z[elemNum*pitch+cellNum] = Z[elemNum*pitch+cellNum] + 0.5 * dt * (V_Z[elemNum*pitch+cellNum] + vFlow);
+#endif
+/// END : SIMPLE FLOW ///
+
+
+#if 1
+/// COUPLING SEM TO LB FLUID ///
+  //int floorx, floory, floorz, ceilx, ceily, ceilz;
+  int SEMx, SEMy, SEMz;
+  float mx, my, mz;  
+//get LB lattice coordinate from (x,y,z) from SCE position//
+  // xSEM_Max = 100, yMax = 50, zMax = 400;
+  //  
+  //  X[elemNum*pitch + cellNum] / xMax * xLB; -> floor of this
+  mx = X[elemNum*pitch + cellNum];
+  my = Y[elemNum*pitch + cellNum];
+  mz = Z[elemNum*pitch + cellNum];
+
+SEMx = floor(X[elemNum*pitch + cellNum]);
+  SEMy = floor(Y[elemNum*pitch + cellNum]);
+  SEMz = floor(Z[elemNum*pitch + cellNum]);
+
+  SEMx = floor(mx);
+  SEMy = floor(my);
+  SEMz = floor(mz);
+
+  size_t fpitch = fluid_grid->rho.pitch;
+  size_t slicePitch = fpitch * fluid_grid->height;
+
+  float ux = get3d_value(fluid_grid->ux.ptr, fpitch, slicePitch, SEMx, SEMy, SEMz);
+  float uy = get3d_value(fluid_grid->uy.ptr, fpitch, slicePitch, SEMx, SEMy, SEMz);
+  float uz = get3d_value(fluid_grid->uz.ptr, fpitch, slicePitch, SEMx, SEMy, SEMz);
+  float rho = get3d_value(fluid_grid->rho.ptr, fpitch, slicePitch, SEMx, SEMy, SEMz);
+/*
+  floorx = floor(mx);
+  floory = floor(my);
+  floorz = floor(mz);
+
+  ceilx = ceil(mx);
+  ceily = ceil(my);
+  ceilz = ceil(mz);
+
+  size_t fpitch = fluid_grid->rho.pitch;
+  size_t slicePitch = fpitch * fluid_grid->height;
+
+  float uxf = get3d_value(fluid_grid->ux.ptr, fpitch, slicePitch, floorx, floory, floorz);
+  float uyf = get3d_value(fluid_grid->uy.ptr, fpitch, slicePitch, floorx, floory, floorz);
+  float uzf = get3d_value(fluid_grid->uz.ptr, fpitch, slicePitch, floorx, floory, floorz);
+  float uxc = get3d_value(fluid_grid->ux.ptr, fpitch, slicePitch, ceilx, ceily, ceilz);
+  float uyc = get3d_value(fluid_grid->uy.ptr, fpitch, slicePitch, ceilx, ceily, ceilz);
+  float uzc = get3d_value(fluid_grid->uz.ptr, fpitch, slicePitch, ceilx, ceily, ceilz);
+  float rho = get3d_value(fluid_grid->rho.ptr, fpitch, slicePitch, floorx, floory, floorz);
+
+  float ux = ((mx - floorx)*uxc) + ((ceilx - mx)*uxf);
+  float uy = ((my - floory)*uyc) + ((ceily - my)*uyf);
+  float uz = ((mz - floorz)*uzc) + ((ceilz - mz)*uzf);
+  */
+
+ // V_X[elemNum*pitch + cellNum] = ux;
+ // V_Y[elemNum*pitch + cellNum] = uy;
+ // V_Z[elemNum*pitch + cellNum] = uz;
+
+/// COUPLED FLOW ///
+#if 0
+   if( totT > 1)
+  {   
+  
+  // X[elemNum*pitch+cellNum] = fpitch;// X[elemNum*pitch+cellNum] + 0.5 * dt * (V_X[elemNum*pitch+cellNum] + ux) ;//  + vFlow);
+  // Y[elemNum*pitch+cellNum] = slicePitch;//Y[elemNum*pitch+cellNum] + 0.5 * dt * (V_Y[elemNum*pitch+cellNum] + uy);
+  // Z[elemNum*pitch+cellNum] = uz;//Z[elemNum*pitch+cellNum] + 0.5 * dt * (V_Z[elemNum*pitch+cellNum] + uz);
+
+ X[elemNum*pitch+cellNum] = ux;// X[elemNum*pitch+cellNum] + 0.5 * dt * (V_X[elemNum*pitch+cellNum] + ux) ;//  + vFlow);
+  Y[elemNum*pitch+cellNum] = uy;//Y[elemNum*pitch+cellNum] + 0.5 * dt * (V_Y[elemNum*pitch+cellNum] + uy);
+   Z[elemNum*pitch+cellNum] = uz;//Z[elemNum*pitch+cellNum] + 0.5 * dt * (V_Z[elemNum*pitch+cellNum] + uz);
+
+   //X[elemNum*pitch+cellNum] = SEMx;// X[elemNum*pitch+cellNum] + 0.5 * dt * (V_X[elemNum*pitch+cellNum] + ux) ;//  + vFlow);
+   //Y[elemNum*pitch+cellNum] = SEMy;//Y[elemNum*pitch+cellNum] + 0.5 * dt * (V_Y[elemNum*pitch+cellNum] + uy);
+   //Z[elemNum*pitch+cellNum] = SEMz;//Z[elemNum*pitch+cellNum] + 0.5 * dt * (V_Z[elemNum*pitch+cellNum] + uz);
+   }else{
+#endif
+
+   X[elemNum*pitch+cellNum] = X[elemNum*pitch+cellNum] + 0.5 * dt * (V_X[elemNum*pitch+cellNum] + ux) ;//  + vFlow);
+   Y[elemNum*pitch+cellNum] = Y[elemNum*pitch+cellNum] + 0.5 * dt * (V_Y[elemNum*pitch+cellNum] + uy);
+   Z[elemNum*pitch+cellNum] = Z[elemNum*pitch+cellNum] + 0.5 * dt * (V_Z[elemNum*pitch+cellNum] + uz);
+  // }
+#endif
+
+/// SIMPLE FLOW ///
+#if 0
+#endif
+
+}
+
+// verlet 2 uses the updated coordinates for Verlet_1() and v(t+ dt/2) to get the F(t+dt) and v(t+dt)
+//This is were 2-body and 3-body and non-bonded forces are calculated and summed up
+__global__ void
+verlet_2(int *numOfElements, float *X, float *V_X , float *F_X , float *Y, float *V_Y , float *F_Y , float *Z, float *V_Z , float *F_Z ,
+		   float *cX, float *cY, float *cZ,  	   
+		   int *elementType, size_t pitch, int numOfCells, int maxCells, int maxElements, float dt, int ReversalPeriod , int *ClockValue, int *SlimeDir, float *bondType)
+{
+   int cellNum = blockIdx.x * blockDim.x + threadIdx.x;
+   int elemNum = blockIdx.y * blockDim.y + threadIdx.y;
+
+   if (cellNum >= numOfCells) return;
+   if (elemNum >= numOfElements[cellNum]) return;
+
+// Calculate new forces for updated coordinates
+
+   float dx1 = 0.0;
+   float dy1 = 0.0;
+   float dz1 = 0.0;
+   float dx2 = 0.0;
+   float dy2 = 0.0;
+   float dz2 = 0.0;
+   float weight = 0.0;  
+   float fconst = 0.0;
+   float r1, r2; //, V;
+   int i, j, k;
+
+// New 2-body bonded using BondType Array
+// Bonded interaction Calculations
+
+// Every Element in Cell check for bonds with other SCE 
+
+//This Naive scheme does not use opposite reaction to add force to both SCEs, each element determines it owns force from all bonded interaction
+   for (i = 0; i < maxElements; i++){
+    int neighborSCE = i; 
+    float myBond = bondType[neighborSCE*pitch+elemNum];
+    
+    if (myBond != 0){
+    dx1 = X[(neighborSCE)*pitch+cellNum] - X[(elemNum)*pitch + cellNum];
+    dy1 = Y[(neighborSCE)*pitch+cellNum] - Y[(elemNum)*pitch + cellNum];
+    dz1 = Z[(neighborSCE)*pitch+cellNum] - Z[(elemNum)*pitch + cellNum];
+
+     r1 = norm(dx1, dy1, dz1);
+     weight = myBond - r1;
+     fconst = k_bond * weight / r1;
+
+    // Force acting on this element due to bond is opposite to the force acting on the next element
+     F_X[(elemNum)*pitch+cellNum] -=  fconst * dx1;
+     F_Y[(elemNum)*pitch+cellNum] -=  fconst * dy1;
+     F_Z[(elemNum)*pitch+cellNum] -=  fconst * dz1;
+     
+    //add slime to the end node's force value
+//      if (SlimeDir[cellNum]){
+ //      fconst -= f_slime / r1;
+  //    };
+     // Force acting on the end node
+   //  F_X[elemNum*pitch+cellNum] -=  fconst * dx1;
+   //  F_Y[elemNum*pitch+cellNum] -=  fconst * dy1;
+  //   F_Z[elemNum*pitch+cellNum] -=  fconst * dz1;
+    }
+}
+// end of bonded interaction
+
+// surface attachment/repulsion
+
+// This force only pushes cell up if they collide with substrate
+//  float SCEradius = 0.2;
+//  dz1 = Z[elemNum*pitch+cellNum] + 1 ; // xy-plane located at z = -1;
+//  if (dz1 < SCEradius){
+//  weight = SCEradius - dz1;
+//  fconst = k_bond * weight / dz1;
+//  F_Z[elemNum*pitch+cellNum] +=  fconst * dz1;
+//  }
+// End of Surface Attachment
+
+//  Add flow in x-dirction with linear velocity profile in z-directioe
+// use z-position to determine flow velocity
+// if SCE is in contact with wall (ie dz1 < SCEradius), the cell should experience zero flow
+//  float maxFlow = 1; //set to one for testing
+//  if(dz1> SCEradius){
+//  float flowHeight;// set the zero-velocity point at z = SCEradiusa
+//  flowHeight = (dz1 - SCEradius);  
+//  F_X[elemNum*pitch+cellNum] +=  flowHeight * maxFlow;  // add force from constant flow.
+//  }
+
+
+
+//Non-bonded Interactions
+ //  float interX = 0.0;
+ //  float interY = 0.0;
+ //  float interZ = 0.0;
+
+   for (j = 0; j < numOfCells; ++j) {
+     if (j == cellNum) continue;  //  For all cells except current cell, check SCE
+     if (NO_NB) return;
+   // TODO:use neighboring cell list to reduce non-bonded calculations
+   //  r = norm(cX[cellNum], cY[cellNum], cZ[cellNum], cX[j], cY[j], cZ[j]);
+   //  if (r > INTER_DIST) continue;
+
+     for (k = 0; k < numOfElements[j]; ++k) {
+        dx1 = X[elemNum*pitch+cellNum] - X[k*pitch + j];
+        dy1 = Y[elemNum*pitch+cellNum] - Y[k*pitch + j];
+        dz1 = Z[elemNum*pitch+cellNum] - Z[k*pitch + j];
+
+        r1 = norm(dx1, dy1, dz1);
+       if (r1 <= NB_CUTOFF ) {
+
+         r2 = Cell_Width*Cell_Width / (r1*r1); // (Sigma / r)^2
+         float r6 = r2 * r2 * r2;
+         float r12 = r6 * r6;
+         fconst = Epsilon * (( 12.0 * r12 / r1) - ( 6.0 * r6 / r1) ) / r1;         
+      //   V = P_MORSE(r, INTER_U0, INTER_ETA0, INTER_U1, INTER_ETA1);
+          F_X[elemNum*pitch+cellNum] +=  fconst * dx1  ;
+          F_Y[elemNum*pitch+cellNum] +=  fconst * dy1  ;
+          F_Z[elemNum*pitch+cellNum] +=  fconst * dz1  ;
+
+          F_X[k*pitch+j] -=  fconst * dx1 ;
+          F_Y[k*pitch+j] -=  fconst * dy1 ;
+          F_Z[k*pitch+j] -=  fconst * dz1 ;
+       }
+
+     }
+   }
+
+
+
+// End of NON-Bonded Interaction
+}
+
+// updates v(t+dt)
+__global__ void
+verlet_3(int *numOfElements, float *X, float *V_X, float *F_X, float *Y, float *V_Y, float *F_Y, float *Z, float *V_Z, float *F_Z,
+		   float *cX, float *cY, float *cZ,
+		   int *elementType, size_t pitch, int numOfCells, int maxCells, int maxElements, float dt, curandState *state)
+{
+   int cellNum = blockIdx.x * blockDim.x + threadIdx.x;
+   int elemNum = blockIdx.y * blockDim.y + threadIdx.y;
+   int id = threadIdx.y * X_a + threadIdx.x   ;
+   if (cellNum >= numOfCells) return;
+   if (elemNum >= numOfElements[cellNum]) return;
+    /* Copy state to local memory for efficiency */
+    curandState localState = state[id];
+
+// Generalized Verlet for Langevin Dynamics using BBK
+   float ranTerm = 0.0; // begin with zero random component
+
+#if 0
+   ranTerm = sqrt(2 * Temp * gamma) * curand_normal(&localState);
+   V_X[elemNum*pitch+cellNum] = V_X[elemNum*pitch+cellNum] + (0.5 / mass) * dt * ( F_X[elemNum*pitch+cellNum] - gamma * mass * V_X[elemNum*pitch+cellNum] + ranTerm ) ;
+
+   ranTerm = sqrt(2 * Temp * gamma) * curand_normal(&localState);
+   V_Y[elemNum*pitch+cellNum] = V_Y[elemNum*pitch+cellNum] + (0.5 / mass) * dt * ( F_Y[elemNum*pitch+cellNum] - gamma * mass * V_Y[elemNum*pitch+cellNum] + ranTerm ) ;
+
+   ranTerm = sqrt(2 * Temp * gamma) * curand_normal(&localState);
+   V_Z[elemNum*pitch+cellNum] = V_Z[elemNum*pitch+cellNum] + (0.5 / mass) * dt * ( F_Z[elemNum*pitch+cellNum] - gamma * mass * V_Y[elemNum*pitch+cellNum] + ranTerm ) ;
+
+#endif
+
+// Langevin-Leapfrog scheme
+   const float fdt = ( 1.0 - exp( -0.5 * gamma * dt ) ) / gamma;
+   const float vdt = exp(-0.5*gamma*dt);
+   const float ndt = sqrt( ( 1.0 - exp( -gamma * dt ) ) / (2.0 * gamma) );
+   const float forceConstant = 2 * Temp * gamma; // Constant::SI::BOLTZMANN * 1.0e15 //for SI units, BOLTZMANN //
+                                      //  * myLangevinTemperature
+                                        //    * effGamma;
+   float sqrtFCoverM = sqrt(forceConstant / mass);
+
+   ranTerm =  curand_normal(&localState);
+   V_X[elemNum*pitch+cellNum] = V_X[elemNum*pitch+cellNum]*vdt +  F_X[elemNum*pitch+cellNum]*fdt/mass +  ranTerm*sqrtFCoverM * ndt  ;
+
+   ranTerm =  curand_normal(&localState);
+   V_Y[elemNum*pitch+cellNum] = V_Y[elemNum*pitch+cellNum]*vdt +  F_Y[elemNum*pitch+cellNum]*fdt/mass +  ranTerm*sqrtFCoverM * ndt  ;
+
+   ranTerm =  curand_normal(&localState);
+   V_Z[elemNum*pitch+cellNum] = V_Z[elemNum*pitch+cellNum]*vdt +  F_Z[elemNum*pitch+cellNum]*fdt/mass +  ranTerm*sqrtFCoverM * ndt  ;
+
+
+/* Copy state back to global memory */
+   state[id] = localState;
+}
+

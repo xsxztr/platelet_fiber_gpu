@@ -1,0 +1,25 @@
+#
+################################################################################
+#
+# Build script for project
+#
+################################################################################
+
+#EMU = --device-emulation
+#NVCCFLAGS = --ptxas-options=-v
+InLibs= /usr/local/cuda/include/
+Libs = /usr/local/cuda/lib64
+
+gpuSEM_LB: gpuSEM_LB.c semLB.cu sem_kernel.cu LB_kernel.cu
+	gcc -g  -c   gpuSEM_LB.c 
+	nvcc $(EMU) $(NVCCFLAGS) -g -G -c semLB.cu
+	g++ -g -fPIC -o gpuSEM_LB gpuSEM_LB.o semLB.o -L$(Libs) -lcudart -lcurand
+
+clean:
+	rm -f *.o
+	rm -f gpuSEM_LB
+	rm -f *.data
+	rm -f *.txt
+	rm -f *.dat
+	rm -rf xyzFiles
+	rm -r Output/*
